@@ -11,5 +11,7 @@ Docker build, since the `COPY` above cannot resolve a path that does not exist.
 
 - `baileys+7.0.0-rc14.patch` (AjuLabs build): the pairing fix from
   evolution-foundation/evolution-api#2759 (handles `companion_reg_refresh` and
-  guards `link_code_companion_reg`), plus the `<status>` ack handler that 2.3.8
-  shipped in its rc.9 patch (commits 2f06ff24 and 821d511b), ported to rc14.
+  guards `link_code_companion_reg`); the `sendMessageAck` change from the
+  2026-11-14 revision of WhiskeySockets/Baileys#2765, so an unpaired companion can
+  ack notifications; and the `<status>` ack handler that 2.3.8 shipped in its rc.9
+  patch (commits 2f06ff24 and 821d511b), ported to rc14.

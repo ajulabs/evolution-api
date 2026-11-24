@@ -1,0 +1,176 @@
+diff --git a/src/lib/queries/instance/manageInstance.tsx b/src/lib/queries/instance/manageInstance.tsx
+index e672928..16b3b7f 100644
+--- a/src/lib/queries/instance/manageInstance.tsx
++++ b/src/lib/queries/instance/manageInstance.tsx
+@@ -36,6 +36,14 @@ const connect = async ({ instanceName, token, number }: ConnectParams) => {
+   return response.data;
+ };
+ 
++// AjuLabs: read-only state check, used to follow the QR without reconnecting.
++const connectionState = async ({ instanceName, token }: { instanceName: string; token: string }) => {
++  const response = await api.get(`/instance/connectionState/${instanceName}`, {
++    headers: { apikey: token },
++  });
++  return response.data;
++};
++
+ interface UpdateSettingsParams {
+   instanceName: string;
+   token: string;
+@@ -84,6 +92,9 @@ export function useManageInstance() {
+ 
+   return {
+     connect: connectMutation,
++    // AjuLabs: plain reads for following the QR, without invalidating the instance queries
++    connectionState,
++    peekConnect: connect,
+     updateSettings: updateSettingsMutation,
+     deleteInstance: deleteInstanceMutation,
+     logout: logoutMutation,
+diff --git a/src/pages/instance/DashboardInstance/index.tsx b/src/pages/instance/DashboardInstance/index.tsx
+index cd11081..6ab0466 100644
+--- a/src/pages/instance/DashboardInstance/index.tsx
++++ b/src/pages/instance/DashboardInstance/index.tsx
+@@ -1,6 +1,6 @@
+ /* eslint-disable react-hooks/exhaustive-deps */
+ import { CircleUser, MessageCircle, RefreshCw, UsersRound } from "lucide-react";
+-import { useEffect, useMemo, useState } from "react";
++import { useEffect, useMemo, useRef, useState } from "react";
+ import { useTranslation } from "react-i18next";
+ import QRCode from "react-qr-code";
+ 
+@@ -24,10 +24,13 @@ function DashboardInstance() {
+   const numberFormatter = new Intl.NumberFormat(i18n.language);
+   const [qrCode, setQRCode] = useState<string | null>(null);
+   const [pairingCode, setPairingCode] = useState("");
++  // AjuLabs: which connect dialog is open, so the QR or pairing code can follow updates
++  const [connectMode, setConnectMode] = useState<null | "qr" | "pairing">(null);
++  const followBusy = useRef(false);
+   const token = getToken(TOKEN_ID.TOKEN);
+   const { theme } = useTheme();
+ 
+-  const { connect, logout, restart } = useManageInstance();
++  const { connect, connectionState, peekConnect, logout, restart } = useManageInstance();
+   const { instance, reloadInstance } = useInstance();
+ 
+   useEffect(() => {
+@@ -38,6 +41,41 @@ function DashboardInstance() {
+     }
+   }, [instance]);
+ 
++  // AjuLabs: since 2026-07-28 WhatsApp retires the secret in the QR right after the first
++  // scan (companion_reg_refresh). Evolution then renders a new QR and the phone has to scan
++  // that one, so the open dialog follows the current QR or pairing code. It only reads while
++  // the instance is connecting: calling connect on a closed instance would start a new session.
++  useEffect(() => {
++    if (!connectMode || !instance || !token) return;
++    const startedAt = Date.now();
++    const timer = setInterval(async () => {
++      if (Date.now() - startedAt > 5 * 60 * 1000) return clearInterval(timer);
++      if (followBusy.current) return;
++      followBusy.current = true;
++      try {
++        const state = (await connectionState({ instanceName: instance.name, token }))?.instance?.state;
++        if (state === "open") {
++          clearInterval(timer);
++          setConnectMode(null);
++          return;
++        }
++        if (state !== "connecting") return;
++        const data = await peekConnect({
++          instanceName: instance.name,
++          token,
++          number: connectMode === "pairing" ? instance.number : undefined,
++        });
++        if (connectMode === "qr" && data?.code) setQRCode((current) => (current === data.code ? current : data.code));
++        if (connectMode === "pairing" && data?.pairingCode) setPairingCode(data.pairingCode);
++      } catch {
++        // keep what is on screen; the next tick tries again
++      } finally {
++        followBusy.current = false;
++      }
++    }, 2000);
++    return () => clearInterval(timer);
++  }, [connectMode, instance?.name, token]);
++
+   const handleReload = async () => {
+     await reloadInstance();
+   };
+@@ -153,18 +191,19 @@ function DashboardInstance() {
+               <Alert variant="warning" className="flex flex-wrap items-center justify-between gap-3">
+                 <AlertTitle className="text-lg font-bold tracking-wide">{t("instance.dashboard.alert")}</AlertTitle>
+ 
+-                <Dialog>
++                <Dialog open={connectMode === "qr"} onOpenChange={(open) => setConnectMode(open ? "qr" : null)}>
+                   <DialogTrigger onClick={() => handleConnect(instance.name, false)} asChild>
+                     <Button variant="warning">{t("instance.dashboard.button.qrcode.label")}</Button>
+                   </DialogTrigger>
+                   <DialogContent onCloseAutoFocus={closeQRCodePopup}>
+                     <DialogHeader>{t("instance.dashboard.button.qrcode.title")}</DialogHeader>
+                     <div className="flex items-center justify-center">{qrCode && <QRCode value={qrCode} size={256} bgColor="transparent" fgColor={qrCodeColor} className="rounded-sm" />}</div>
++                    <p className="text-center text-sm text-muted-foreground">{t("instance.dashboard.button.qrcode.hint")}</p>
+                   </DialogContent>
+                 </Dialog>
+ 
+                 {instance.number && (
+-                  <Dialog>
++                  <Dialog open={connectMode === "pairing"} onOpenChange={(open) => setConnectMode(open ? "pairing" : null)}>
+                     <DialogTrigger className="connect-code-button" onClick={() => handleConnect(instance.name, true)}>
+                       {t("instance.dashboard.button.pairingCode.label")}
+                     </DialogTrigger>
+diff --git a/src/translate/languages/en-US.json b/src/translate/languages/en-US.json
+index f63d13e..3c7e766 100644
+--- a/src/translate/languages/en-US.json
++++ b/src/translate/languages/en-US.json
+@@ -142,7 +142,8 @@
+       "button": {
+         "qrcode": {
+           "label": "Get QR Code",
+-          "title": "Scan the QR code with your WhatsApp Web"
++          "title": "Scan the QR code with your WhatsApp Web",
++          "hint": "If the phone shows an error on the first scan, scan again: the QR code updates by itself."
+         },
+         "pairingCode": {
+           "label": "Get Pairing Code",
+diff --git a/src/translate/languages/es-ES.json b/src/translate/languages/es-ES.json
+index 1dc881f..13c2a43 100644
+--- a/src/translate/languages/es-ES.json
++++ b/src/translate/languages/es-ES.json
+@@ -122,7 +122,8 @@
+       "button": {
+         "qrcode": {
+           "label": "Generar Código QR",
+-          "title": "Escanea el Código QR con WhatsApp"
++          "title": "Escanea el Código QR con WhatsApp",
++          "hint": "Si el teléfono muestra un error en el primer escaneo, escanee de nuevo: el código QR se actualiza solo."
+         },
+         "pairingCode": {
+           "label": "Generar Código de Emparejamiento",
+diff --git a/src/translate/languages/fr-FR.json b/src/translate/languages/fr-FR.json
+index 7b36399..5b0fe91 100644
+--- a/src/translate/languages/fr-FR.json
++++ b/src/translate/languages/fr-FR.json
+@@ -121,7 +121,8 @@
+       "button": {
+         "qrcode": {
+           "label": "Générer un Code QR",
+-          "title": "Scannez le Code QR avec WhatsApp"
++          "title": "Scannez le Code QR avec WhatsApp",
++          "hint": "Si le téléphone affiche une erreur au premier scan, scannez à nouveau : le QR code se met à jour tout seul."
+         },
+         "pairingCode": {
+           "label": "Générer un Code d'Appairage",
+diff --git a/src/translate/languages/pt-BR.json b/src/translate/languages/pt-BR.json
+index 7943d44..f950674 100644
+--- a/src/translate/languages/pt-BR.json
++++ b/src/translate/languages/pt-BR.json
+@@ -122,7 +122,8 @@
+       "button": {
+         "qrcode": {
+           "label": "Gerar QR Code",
+-          "title": "Scaneie o QR Code com o WhatsApp"
++          "title": "Scaneie o QR Code com o WhatsApp",
++          "hint": "Se o celular mostrar erro no primeiro scan, escaneie de novo: o QR Code se atualiza sozinho."
+         },
+         "pairingCode": {
+           "label": "Gerar Código de Pareamento",

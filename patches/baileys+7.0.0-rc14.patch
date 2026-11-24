@@ -1,8 +1,25 @@
 diff --git a/node_modules/baileys/lib/Socket/messages-recv.js b/node_modules/baileys/lib/Socket/messages-recv.js
-index f2003ac..a9b0d5d 100644
+index f2003ac..c3bf980 100644
 --- a/node_modules/baileys/lib/Socket/messages-recv.js
 +++ b/node_modules/baileys/lib/Socket/messages-recv.js
-@@ -880,6 +880,7 @@ export const makeMessagesRecvSocket = (config) => {
+@@ -359,7 +359,15 @@ export const makeMessagesRecvSocket = (config) => {
+         }
+     };
+     const sendMessageAck = async (node, errorCode) => {
+-        const stanza = buildAckStanza(node, errorCode, authState.creds.me.id);
++        // From WhiskeySockets/Baileys#2765 (revision of 2026-11-14): an unpaired
++        // companion has no creds.me yet, but still has to ack the notifications it
++        // gets before pairing (e.g. companion_reg_refresh); buildAckStanza only
++        // reads meId for message-class acks, which cannot be sent without an identity
++        const meId = authState.creds.me?.id;
++        if (node.tag === 'message' && !meId) {
++            throw new Boom('cannot ack a message before creds.me is set');
++        }
++        const stanza = buildAckStanza(node, errorCode, meId);
+         logger.debug({ recv: { tag: node.tag, attrs: node.attrs }, sent: stanza.attrs }, 'sent ack');
+         await sendNode(stanza);
+     };
+@@ -880,6 +888,7 @@ export const makeMessagesRecvSocket = (config) => {
                  break;
              case 'link_code_companion_reg':
                  const linkCodeCompanionReg = getBinaryNodeChild(node, 'link_code_companion_reg');
@@ -10,7 +27,7 @@ index f2003ac..a9b0d5d 100644
                  const ref = toRequiredBuffer(getBinaryNodeChildBuffer(linkCodeCompanionReg, 'link_code_pairing_ref'));
                  const primaryIdentityPublicKey = toRequiredBuffer(getBinaryNodeChildBuffer(linkCodeCompanionReg, 'primary_identity_pub'));
                  const primaryEphemeralPublicKeyWrapped = toRequiredBuffer(getBinaryNodeChildBuffer(linkCodeCompanionReg, 'link_code_pairing_wrapped_primary_ephemeral_pub'));
-@@ -1232,6 +1233,16 @@ export const makeMessagesRecvSocket = (config) => {
+@@ -1232,6 +1241,16 @@ export const makeMessagesRecvSocket = (config) => {
              await sendMessageAck(node).catch(ackErr => logger.error({ ackErr }, 'failed to ack receipt'));
          }
      };
@@ -27,7 +44,7 @@ index f2003ac..a9b0d5d 100644
      const handleNotification = async (node) => {
          const remoteJid = node.attrs.from;
          try {
-@@ -1580,7 +1591,8 @@ export const makeMessagesRecvSocket = (config) => {
+@@ -1580,7 +1599,8 @@ export const makeMessagesRecvSocket = (config) => {
          ['message', handleMessage],
          ['call', handleCall],
          ['receipt', handleReceipt],
@@ -37,7 +54,7 @@ index f2003ac..a9b0d5d 100644
      ]), {
          isWsOpen: () => ws.isOpen,
          onUnexpectedError,
-@@ -1621,6 +1633,9 @@ export const makeMessagesRecvSocket = (config) => {
+@@ -1621,6 +1641,9 @@ export const makeMessagesRecvSocket = (config) => {
      ws.on('CB:notification', async (node) => {
          await processNode('notification', node, 'handling notification', handleNotification);
      });
