@@ -1,3 +1,14 @@
+> [!NOTE]
+> **AjuLabs build of Evolution API 2.3.8** (branch `habita/2.3.8`, tags `2.3.8-habita.*`), used by the Habita project.
+> It is the upstream `2.3.8` release with only the changes below. This list is kept here as required by section 4(b) of the Apache License 2.0.
+>
+> - `package.json` / `package-lock.json`: Baileys pinned to `7.0.0-rc14`. The `7.0.0-rc.9` shipped with 2.3.8 is affected by CVE-2026-48063, fixed in rc12.
+> - `patches/baileys+7.0.0-rc14.patch` (replaces `baileys+7.0.0-rc.9.patch`):
+>   - the device-pairing fix from evolution-foundation/evolution-api#2759 (a backport of #2727, which vendors WhiskeySockets/Baileys#2765 and #2602), without which new numbers cannot pair;
+>   - the `<status>` ack handler from the 2.3.8 rc.9 patch, ported to rc14.
+> - `src/api/integrations/channel/whatsapp/whatsapp.baileys.service.ts`: the `console.log` calls that printed messages, call packets or phone numbers go through `this.logger.verbose`, which `LOG_LEVEL` filters. One duplicate log of each received message was removed.
+> - `Docker/scripts/generate_database.sh`, `Docker/scripts/deploy_database.sh`: no longer print the database URL.
+
 <p align="center">
   <a href="https://evolutionfoundation.com.br">
     <img src="./public/hover-evolution.png" alt="Evolution Foundation" />
