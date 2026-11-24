@@ -1099,7 +1099,11 @@ export class BaileysStartupService extends ChannelStartupService {
               ].some((err) => param?.includes?.(err)),
             )
           ) {
-            this.logger.warn(`Message ignored with messageStubParameters: ${JSON.stringify(received, null, 2)}`);
+            // AjuLabs: the full message carries the sender number and name; keep it out of WARN
+            this.logger.warn(
+              `Message ignored with messageStubParameters: ${JSON.stringify({ id: received.key?.id, messageStubParameters: received.messageStubParameters })}`,
+            );
+            this.logger.verbose(received);
             continue;
           }
           if (received.message?.conversation || received.message?.extendedTextMessage?.text) {
